@@ -1,15 +1,16 @@
 <?php
 /**
- * Plugin Name: JP bbPress Slack Integration
+ * Plugin Name: bbPress Slack Integration
  * Description: Send notifications of new bbPress topics and replies to a Slack channel.
- * Author: Josh Pollock
- * Author URI: http://joshpress.net
- * Version: 0.3.0
- * Plugin URI: https://github.com/Shelob9/jp-bbpress-slack-integration
+ * Author: John Pierce forked from Josh Pollock
+ * Author URI: http://johnparnellpierce.com
+ * Version: 0.3.2
+ * Plugin URI: http://kloxong.org
  * License: GNU GPLv2+
  */
 /**
- * Copyright (c) 2014 Josh Pollock (email : jpollock412@gmail.com)
+ * Copyright (c) 2014-2020 Josh Pollock (email : jpollock412@gmail.com)
+ * Copyright (c) 2020 John Pierce (email : john@johnparnellpierce.com)	
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 or, at
@@ -26,43 +27,54 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-add_action( 'bbp_new_reply',  'jp_bbp_slack_integration', 20, 2 );
-add_action( 'bbp_new_topic',  'jp_bbp_slack_integration', 20, 2 );
-function jp_bbp_slack_integration(  $id, $parent_id ) {
-	$url = get_option( 'jp_bbpress_slack_webhook', false );
+add_action( 'bbp_new_reply',  'bbp_slack_integration', 20, 2 );
+add_action( 'bbp_new_topic',  'bbp_slack_integration', 20, 2 );
+function bbp_slack_integration(  $id, $parent_id ) {
+	$url = get_option( 'bbpress_slack_webhook', false );
 	if ( $url ) {
 		$post = get_post( $id );
 		$type = $post->post_type;
+		$author = get_the_author_meta('display_name',$post->post_author);
 
 		if ( 'reply' == $type ) {
 			$link = get_permalink( $parent_id );
 			$link .= '#post-'.$id;
+			$title = 'Reply: '. get_the_title( $parent_id );
 		}
 		else {
 			$link = get_permalink( $id );
+			$title = $post->post_title;
 		}
 
 		$link = htmlspecialchars( $link );
 
 
 		$excerpt = wp_trim_words( $post->post_content );
-		if ( 500 < strlen( $excerpt ) ) {
-			$excerpt = substr( $excerpt, 0, 500 );
+		if ( 127 < strlen( $excerpt ) ) {
+			$excerpt = substr( $excerpt, 0, 127 );
 		}
 
 		$payload = array(
-			'text'        => __( 'New bbPress Update', 'jp-bbpress-slack' ),
-			'attachments' => array(
+			'text'        => __( '<'.$link.'|'.$title.' >', 'bbpress-slack' ),
+			'username' => 'Forumbot',
+			'attachments' => array(array(
 				'fallback' => $link,
 				'color'    => '#ff000',
-				'fields'   => array(
-					'title' => $link,
-					'value' => $link,
-					'text'  => $excerpt,
+				'fields'   => array(array(
+					'title' => $author. ' wrote:',
+					'value' => $excerpt,
+				)
 				)
 			),
+			)					   
 		);
 		$output  = 'payload=' . json_encode( $payload );
+		
+		$pluginlog = plugin_dir_path(__FILE__).'debug.log';
+		$errmessage = 'Payload: '.$output.PHP_EOL;
+// Uncomment to log payload to slack
+//		error_log($errmessage, 3, $pluginlog);
+	
 
 		$response = wp_remote_post( $url, array(
 			'body' => $output,
@@ -75,7 +87,7 @@ function jp_bbp_slack_integration(  $id, $parent_id ) {
 		 *
 		 * @since 0.3.0
 		 */
-		do_action( 'jp_bbp_slack_integration_post_send', $response );
+		do_action( 'bbp_slack_integration_post_send', $response );
 
 	}
 
@@ -87,14 +99,14 @@ function jp_bbp_slack_integration(  $id, $parent_id ) {
  * @since 0.2.0
  */
 if ( is_admin() ) {
-	new jp_bbp_slack_integration_admin();
+	new bbp_slack_integration_admin();
 }
 
-class jp_bbp_slack_integration_admin {
+class bbp_slack_integration_admin {
 
-	private $option_name = 'jp_bbpress_slack_webhook';
-	private $nonce_name = '_jp_bbpress_slack_nonce';
-	private $nonce_action = '_jp_bbpress_slack_nonce_action';
+	private $option_name = 'bbpress_slack_webhook';
+	private $nonce_name = '_bbpress_slack_nonce';
+	private $nonce_action = '_bbpress_slack_nonce_action';
 
 	function __construct() {
 		add_action( 'admin_menu', array( $this, 'menu' ) );
@@ -107,10 +119,10 @@ class jp_bbp_slack_integration_admin {
 	 */
 	function menu() {
 		add_options_page(
-			__( 'bbPress Slack Integration', 'jp-bbpress-slack' ),
-			__( 'bbPress Slack Integration', 'jp-bbpress-slack' ),
+			__( 'bbPress Slack Integration', 'bbpress-slack' ),
+			__( 'bbPress Slack Integration', 'bbpress-slack' ),
 			'manage_options',
-			'jp_bbp_slack',
+			'bbp_slack',
 			array( $this, 'page' )
 		);
 	}
@@ -154,7 +166,7 @@ class jp_bbp_slack_integration_admin {
 	 * @return string The form.
 	 */
 	function form() {
-		$out[] = '<form id="jp_bbp_slack_integration" method="POST" action="options-general.php?page=jp_bbp_slack">';
+		$out[] = '<form id="bbp_slack_integration" method="POST" action="options-general.php?page=bbp_slack">';
 		$out[] = wp_nonce_field( $this->nonce_action, $this->nonce_name, true, false );
 		$url = get_option( $this->option_name, '' );
 		$out[] = '<input id="slack-hook" name="slack-hook"type="text" value="'.esc_url( $url ).'"></input>';
@@ -173,13 +185,13 @@ class jp_bbp_slack_integration_admin {
 	 * @return string The instructions.
 	 */
 	function instructions() {
-		$header = '<h3>' . __( 'Instructions:', 'jp-bbpress-slack' ) .'</h3>';
+		$header = '<h3>' . __( 'Instructions:', 'bbpress-slack' ) .'</h3>';
 		$instructions = array(
-			__( 'Go To https://<your-team-name>.slack.com/services/new/incoming-webhook', 'jp-bbpress-slack' ),
-			__( ' Create a new webhook', 'jp-bbpress-slack' ),
-			__( 'Set a channel to receive the notifications', 'jp-bbpress-slack' ),
-			__( 'Copy the URL for the webhook	', 'jp-bbpress-slack' ),
-			__( 'Past the URL into the field below and click submit', 'jp-bbpress-slack' ),
+			__( 'Go To https://<your-team-name>.slack.com/services/new/incoming-webhook', 'bbpress-slack' ),
+			__( ' Create a new webhook', 'bbpress-slack' ),
+			__( 'Set a channel to receive the notifications', 'bbpress-slack' ),
+			__( 'Copy the URL for the webhook	', 'bbpress-slack' ),
+			__( 'Past the URL into the field below and click submit', 'bbpress-slack' ),
 		);
 
 		return $header. "<ol><li>" .implode( "</li><li>", $instructions ) . "</li></ol>";
